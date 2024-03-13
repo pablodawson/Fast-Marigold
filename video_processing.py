@@ -34,7 +34,6 @@ for i, image_path in tqdm.tqdm(enumerate(images), total=len(images)):
     if i==0:
         pipeline_output = pipe(cur_image, input_depth=None, denoising_steps=10, ensemble_size=10)
         depth = pipeline_output.depth_np
-        depth = (depth - np.min(depth)) / (np.max(depth) - np.min(depth))
         prev_depth = depth
         
     else:
