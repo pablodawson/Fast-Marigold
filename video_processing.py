@@ -23,7 +23,6 @@ flow_estimator = FlowEstimator("gmflow/pretrained/gmflow_things-e9887eda.pth", "
 frames_path = "input/cam09/images"
 images = glob.glob(frames_path + "/*.png")
 images.sort()
-images = images[:100]
 noise_ratio = 0.35
 
 for i, image_path in tqdm.tqdm(enumerate(images), total=len(images)):
@@ -43,4 +42,4 @@ for i, image_path in tqdm.tqdm(enumerate(images), total=len(images)):
         
         prev_depth = pipeline_output.depth_np
 
-    pipeline_output.depth_colored.save(f"video_out/output_{i}_colored.png")
+    pipeline_output.depth_colored.save(f"video_out/{str(i).zfill(4)}.png")
