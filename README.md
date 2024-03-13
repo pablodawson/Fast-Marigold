@@ -1,4 +1,14 @@
-# Marigold: Repurposing Diffusion-Based Image Generators for Monocular Depth Estimation
+# Marigold Video
+This is a modification of Marigold for Monocular Depth Estimation on Video.
+It reuses information from previous frames using optical flow, achieving better efficiency while reducing flicker.
+On my 3070 it runs at ~1 second per frame, vs ~20 for a single image.
+
+A very rough otherview of the method:
+
+![IMG_0019](https://github.com/pablodawson/Marigold-Video/assets/74978011/e9ea840b-0c39-4c4d-ba6e-97fd0449be40)
+
+
+**The original README is below**
 
 **CVPR 2024**
 
