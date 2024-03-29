@@ -18,32 +18,33 @@
 # --------------------------------------------------------------------------
 
 
+import logging
 from typing import Dict, Union
 
-import torch
-from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
-from tqdm.auto import tqdm
-from PIL import Image
-from PIL.Image import Resampling
-
+import torch
 from diffusers import (
-    DiffusionPipeline,
-    DDIMScheduler,
-    UNet2DConditionModel,
     AutoencoderKL,
+    DDIMScheduler,
+    DiffusionPipeline,
+    LCMScheduler,
+    UNet2DConditionModel,
 )
 from diffusers.utils import BaseOutput
+from PIL import Image
+from PIL.Image import Resampling
+from torch.utils.data import DataLoader, TensorDataset
+from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 
+from .util.batchsize import find_batch_size
+from .util.ensemble import ensemble_depths
 from .util.image_util import (
     chw2hwc,
     colorize_depth_maps,
-    resize_max_res,
     get_pil_resample_method,
+    resize_max_res,
 )
-from .util.batchsize import find_batch_size
-from .util.ensemble import ensemble_depths
 
 
 class MarigoldDepthOutput(BaseOutput):
@@ -92,7 +93,7 @@ class MarigoldPipeline(DiffusionPipeline):
         self,
         unet: UNet2DConditionModel,
         vae: AutoencoderKL,
-        scheduler: DDIMScheduler,
+        scheduler: Union[DDIMScheduler, LCMScheduler],
         text_encoder: CLIPTextModel,
         tokenizer: CLIPTokenizer,
     ):
@@ -107,9 +108,6 @@ class MarigoldPipeline(DiffusionPipeline):
         )
 
         self.empty_text_embed = None
-
-        if not hasattr(self, "dtype"):
-            self.dtype = self.unet.dtype
 
     @torch.no_grad()
     def __call__(
@@ -162,18 +160,19 @@ class MarigoldPipeline(DiffusionPipeline):
             - **uncertainty** (`None` or `np.ndarray`) Uncalibrated uncertainty(MAD, median absolute deviation)
                     coming from ensembling. None if `ensemble_size = 1`
         """
-
+        self.noise_ratio = noise_ratio
         device = self.device
         input_size = input_image.size
 
-        self.noise_ratio = noise_ratio
         if not match_input_res:
             assert (
                 processing_res is not None
             ), "Value error: `resize_output_back` is only valid with "
         assert processing_res >= 0
-        assert denoising_steps >= 1
         assert ensemble_size >= 1
+
+        # Check if denoising step is reasonable
+        self._check_inference_step(denoising_steps)
 
         resample_method: Resampling = get_pil_resample_method(resample_method)
 
@@ -189,8 +188,8 @@ class MarigoldPipeline(DiffusionPipeline):
         input_image = input_image.convert("RGB")
         image = np.asarray(input_image)
 
-        # ----------------- Depth Preprocess -----------------
-        
+                # ----------------- Depth Preprocess -----------------
+
         self.depth_provided = input_depth is not None
         if not self.depth_provided:
             input_depth = Image.fromarray(np.ones_like(image))
@@ -202,7 +201,7 @@ class MarigoldPipeline(DiffusionPipeline):
                 max_edge_resolution=processing_res,
                 resample_method=resample_method,
             )
-        
+
         input_depth = input_depth.convert("RGB")
         input_depth = np.asarray(input_depth)
 
@@ -213,13 +212,6 @@ class MarigoldPipeline(DiffusionPipeline):
         rgb_norm = rgb_norm.to(device)
         assert rgb_norm.min() >= -1.0 and rgb_norm.max() <= 1.0
 
-        # Normalize depth values
-
-        #self.depth_bounds = (input_depth.min(), input_depth.max())
-        #if self.depth_bounds[0] == self.depth_bounds[1]:
-        #    self.depth_bounds = (0, 255)
-                
-        #depth = (input_depth - self.depth_bounds[0])/ (self.depth_bounds[1] - self.depth_bounds[0])
         depth = np.transpose(input_depth, (2, 0, 1))  # [H, W, rgb] -> [rgb, H, W]
         depth_norm = depth/255 * 2.0 - 1.0
         depth_norm = torch.from_numpy(depth_norm).to(self.dtype)
@@ -243,6 +235,8 @@ class MarigoldPipeline(DiffusionPipeline):
                 dtype=self.dtype,
             )
 
+        self.batch_size = _bs
+        
         single_rgb_loader = DataLoader(
             single_rgb_dataset, batch_size=_bs, shuffle=False
         )
@@ -250,6 +244,7 @@ class MarigoldPipeline(DiffusionPipeline):
         single_depth_loader = DataLoader(
             single_depth_dataset, batch_size=_bs, shuffle=False
         )
+
 
         # Predict depth maps (batched)
         depth_pred_ls = []
@@ -260,7 +255,7 @@ class MarigoldPipeline(DiffusionPipeline):
         else:
             iterable = zip(single_rgb_loader, single_depth_loader)
         for batch in iterable:
-            (batched_img,batched_depth) = batch
+            (batched_img, batched_depth) = batch
             batched_img = batched_img[0]
             batched_depth = batched_depth[0]
 
@@ -285,17 +280,15 @@ class MarigoldPipeline(DiffusionPipeline):
 
         # ----------------- Post processing -----------------
         # Scale prediction to [0, 1]
-        #min_d = torch.min(depth_pred)
-        #max_d = torch.max(depth_pred)
-        #depth_pred = (depth_pred - min_d) / (max_d - min_d)
-        #depth_pred = torch.clip(depth_pred, 0, 1)
-        #depth_og_scale = depth_pred * (self.depth_bounds[1] - self.depth_bounds[0]) + self.depth_bounds[0]
+        min_d = torch.min(depth_pred)
+        max_d = torch.max(depth_pred)
+        depth_pred = (depth_pred - min_d) / (max_d - min_d)
 
         # Convert to numpy
         depth_pred = depth_pred.cpu().numpy().astype(np.float32)
 
-        # Mix with input depth
         depth_out = input_depth_mix * depth_pred + (1 - input_depth_mix) * input_depth[:,:,0]/255.0
+
         # Resize back to original resolution
         if match_input_res:
             depth_out = Image.fromarray(depth_out)
@@ -304,7 +297,7 @@ class MarigoldPipeline(DiffusionPipeline):
 
         # Clip output range
         depth_out = depth_out.clip(0, 1)
-
+        
         # Colorize
         if color_map is not None:
             depth_colored = colorize_depth_maps(
@@ -319,8 +312,27 @@ class MarigoldPipeline(DiffusionPipeline):
         return MarigoldDepthOutput(
             depth_np=depth_out,
             depth_colored=depth_colored_img,
-            uncertainty=pred_uncert
+            uncertainty=pred_uncert,
         )
+
+    def _check_inference_step(self, n_step: int):
+        """
+        Check if denoising step is reasonable
+        Args:
+            n_step (`int`): denoising steps
+        """
+        assert n_step >= 1
+        
+        if isinstance(self.scheduler, DDIMScheduler):
+            if n_step < 10:
+                logging.warning(
+                    f"Too few denoising step: {n_step}. Recommended to use the LCM checkpoint for few-step inference."
+                )
+        elif isinstance(self.scheduler, LCMScheduler):
+            if not 1 <= n_step <= 4:
+                logging.warning(
+                    f"Non-optimal setting of denoising steps: {n_step}. Recommended setting is 1-4 steps."
+                )
 
     def __encode_empty_text(self):
         """
@@ -364,18 +376,18 @@ class MarigoldPipeline(DiffusionPipeline):
         rgb_latent = self.encode_rgb(rgb_in)
 
         # Initial depth map (noise)
-        #depth_latent = torch.randn(
-        #    rgb_latent.shape, device=device, dtype=self.dtype
-        #)  # [B, 4, h, w]
-
         depth_latent = self.encode_rgb(depth_in)
+
+        latent_timestep = timesteps[:1].repeat(self.batch_size)
 
         if self.depth_provided:
             depth_latent_noise = torch.randn(
                 rgb_latent.shape, device=device, dtype=self.dtype
             )
+            # better way to add noise?
+            #depth_latent = depth_latent* (1- self.noise_ratio) + depth_latent_noise * self.noise_ratio
+            depth_latent = self.scheduler.add_noise(depth_latent, depth_latent_noise, latent_timestep)
 
-            depth_latent = depth_latent* (1- self.noise_ratio) + depth_latent_noise * self.noise_ratio
         else:
             depth_latent = torch.randn(
             rgb_latent.shape, device=device, dtype=self.dtype

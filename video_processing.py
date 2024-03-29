@@ -12,7 +12,7 @@ import tqdm
 
 
 pipe = MarigoldPipeline.from_pretrained(
-    "Bingxin/Marigold",
+    "prs-eth/marigold-lcm-v1-0",
     torch_dtype=torch.float16
 )
 
@@ -31,13 +31,13 @@ for i, image_path in tqdm.tqdm(enumerate(images), total=len(images)):
     flow = flow_estimator.estimate_flow(np.array(prev_image), np.array(cur_image))
 
     if i==0:
-        pipeline_output = pipe(cur_image, input_depth=None, denoising_steps=10, ensemble_size=10)
+        pipeline_output = pipe(cur_image, input_depth=None, denoising_steps=1, ensemble_size=5)
         depth = pipeline_output.depth_np
         prev_depth = depth
         
     else:
         warped_depth = warp_with_flow(flow, prev_depth)
-        pipeline_output = pipe(cur_image, input_depth=Image.fromarray(warped_depth*255), denoising_steps=4, 
+        pipeline_output = pipe(cur_image, input_depth=Image.fromarray(warped_depth*255), denoising_steps=1, 
                                ensemble_size=1, noise_ratio=noise_ratio, input_depth_mix = 0.4, show_progress_bar=False)
         
         prev_depth = pipeline_output.depth_np
