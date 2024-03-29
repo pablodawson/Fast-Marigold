@@ -37,7 +37,7 @@ for i, image_path in tqdm.tqdm(enumerate(images), total=len(images)):
         
     else:
         warped_depth = warp_with_flow(flow, prev_depth)
-        pipeline_output = pipe(cur_image, input_depth=Image.fromarray(warped_depth*255), denoising_steps=1, 
+        pipeline_output = pipe(cur_image, input_depth=Image.fromarray(warped_depth*255), denoising_steps=1,
                                ensemble_size=1, noise_ratio=noise_ratio, input_depth_mix = 0.4, show_progress_bar=False)
         
         prev_depth = pipeline_output.depth_np
