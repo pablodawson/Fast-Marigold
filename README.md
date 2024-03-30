@@ -1,7 +1,11 @@
 # Marigold Video
 This is a modification of Marigold for Monocular Depth Estimation on Video.
 It reuses information from previous frames using optical flow, achieving better efficiency while reducing flicker.
-On my 3070 it runs at ~1 second per frame, vs ~20 for a single image.
+On my 3070 it runs at ~0.6 seconds per frame, vs ~2 for a single image.
+
+ 
+https://github.com/pablodawson/Marigold-Video/assets/74978011/b7cb6e47-2950-47e8-9c4e-0fff8c11e57e
+
 
 A very rough otherview of the method:
 
