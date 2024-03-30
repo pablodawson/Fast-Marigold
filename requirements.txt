@@ -4,3 +4,5 @@ matplotlib
 scipy
 torch==2.0.1
 transformers>=4.32.1
+simple-lama-inpainting>=0.1.0
+opencv-python

@@ -387,7 +387,7 @@ class MarigoldPipeline(DiffusionPipeline):
             # better way to add noise?
             #depth_latent = depth_latent* (1- self.noise_ratio) + depth_latent_noise * self.noise_ratio
             #depth_latent = depth_latent* (1- self.noise_ratio) + depth_latent_noise * self.noise_ratio
-            depth_latent = self.scheduler.add_noise(depth_latent, depth_latent_noise, torch.tensor([self.noise_ratio*999]))
+            depth_latent = self.scheduler.add_noise(depth_latent, depth_latent_noise, torch.tensor([int(self.noise_ratio*999)]))
 
         else:
             depth_latent = torch.randn(

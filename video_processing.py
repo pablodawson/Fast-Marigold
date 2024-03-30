@@ -12,7 +12,8 @@ import time
 
 parser = argparse.ArgumentParser(description='Extract depth from video frames.')
 parser.add_argument('--video_path', type=str, help='Path to the directory containing input frames')
-parser.add_argument('--duration', type=int, default=100, help='Duration in frames to be processed')
+parser.add_argument('--duration', type=int, default=120, help='Duration in frames to be processed')
+parser.add_argument('--fps', type=int, default=30, help='Output video fps')
 parser.add_argument('--noise_ratio', type=float, default=0.65, help='How much to base the prediction on the previous depth map')
 parser.add_argument('--blend_ratio', type=float, default=0.2, help='How much to blend in the previous depth map')
 
@@ -20,8 +21,8 @@ parser.add_argument('--remove_ghosting', type=bool, default=True, help='Detect a
 parser.add_argument('--moved_ratio_threshold', type=float, default=0.01, help='Threshold for movement detection')
 parser.add_argument('--depth_diff_threshold', type=float, default=0.01, help='Threshold for depth difference detection')
 
-parser.add_argument('--output_path', type=str, default='depth.mp4', help='Path to save the output frames')
-parser.add_argument('--debug', type=bool, default=True)
+parser.add_argument('--output', type=str, default='depth.mp4', help='Path to save the output frames')
+parser.add_argument('--debug', type=bool, default=False)
 
 args = parser.parse_args()
 
@@ -33,12 +34,12 @@ pipe.to("cuda")
 
 flow_estimator = FlowEstimator("gmflow/pretrained/gmflow_things-e9887eda.pth", "cuda")
 
-os.makedirs(args.output_path, exist_ok=True)
+#os.makedirs(args.output_path, exist_ok=True)
 
 cap = cv2.VideoCapture(args.video_path)
 ret,frame = cap.read()
 frame_height, frame_width, _ = frame.shape
-out = cv2.VideoWriter(args.output_path ,cv2.VideoWriter_fourcc('X','V','I','D'), 10, (frame_width,frame_height))
+out = cv2.VideoWriter(args.output ,cv2.VideoWriter_fourcc('X','V','I','D'), args.fps, (frame_width,frame_height))
 
 prev_image = None
 idx = 0
@@ -84,7 +85,9 @@ while cap.isOpened():
 
     print(f"Frame {idx} processed in {time.time() - timestart} seconds")
     
-    out.write(cv2.cvtColor(np.array(pipeline_output.depth_colored), cv2.COLOR_RGB2BGR))
+    # video has a transient for some reason, comment condition to save all frames instead
+    if idx>10:
+        out.write(cv2.cvtColor(np.array(pipeline_output.depth_colored), cv2.COLOR_RGB2BGR))
 
 cap.release()
 out.release()
