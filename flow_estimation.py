@@ -45,7 +45,7 @@ class FlowEstimator:
         
         return img[0]
             
-    def estimate_flow(self, img0, img1):
+    def estimate_flow(self, img0, img1, return_as_tensor=False):
         
         og_size = img0.shape[:2]
 
@@ -65,8 +65,10 @@ class FlowEstimator:
         # Compensate for changed resolution
         flow_pred = flow_pred * torch.tensor([og_size[1]/new_size[1], og_size[0]/new_size[0]]).view(1, 2, 1, 1).to(flow_pred.device)
         
+        if return_as_tensor:
+            return flow_pred
+        
         flow_np = flow_pred.cpu().detach().numpy()
-
         flow_np = flow_np[0].transpose(1, 2, 0)
 
         return flow_np
